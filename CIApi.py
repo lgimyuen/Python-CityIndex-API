@@ -100,8 +100,8 @@ class COrderList:
         return orders
 
 
-class CIApi(Singleton):
-    """Summary of CIApi
+class API(Singleton):
+    """Summary of API
     This is a Cityindex API Class.
     Features:
         * Authentication
@@ -266,7 +266,8 @@ class CIApi(Singleton):
         :return: GetPriceBarResponseDTO
         """
         url = self.APIURL + "/market/" + str(
-            self.market_info[symbol]["MarketId"]) + "/barhistory?Username=" + self.uid + "&Session=" + self.session + "&interval=" + interval + "&span=" + span + "&PriceBars=" + pricebars + "&PriceType=" + priceType
+            self.market_info[symbol][
+                "MarketId"]) + "/barhistory?Username=" + self.uid + "&Session=" + self.session + "&interval=" + interval + "&span=" + span + "&PriceBars=" + pricebars + "&PriceType=" + priceType
         response = requests.get(url)
         if (response.status_code != 200):
             print("GetPriceBarHistory: HTTP Error " + str(response.status_code))
@@ -593,7 +594,12 @@ class CIApi(Singleton):
         if simulatedOrder["StatusReason"] != 1:
             return False
 
+        #Total Margin required after this trade
         SimulatedTotalMarginRequirement = simulatedOrder["SimulatedTotalMarginRequirement"]
+        #Total current Margin
+        actualTotalMargin = simulatedOrder["ActualTotalMarginRequirement"]
+
+        SimulatedTotalMarginRequirement = SimulatedTotalMarginRequirement - actualTotalMargin
 
         if SimulatedTotalMarginRequirement <= 0.0:
             return False
@@ -623,7 +629,7 @@ class CIApi(Singleton):
 class Context:
     lightstreamer_url = 'https://push.cityindex.com'
 
-    def __init__(self, symbol, ea_param, time_interval, time_span, bars_count, market_id):
+    def __init__(self, symbol, ea_param, time_interval, time_span, handle_data, bars_count="65000"):
         self.high = []
         self.low = []
         self.close = []
@@ -637,11 +643,32 @@ class Context:
         self.TimeInterval = time_interval
         self.TimeSpan = time_span
         self.BarsCount = bars_count
-        self.marketID = market_id
-
+        self.handle_data = handle_data
+        self.LS_PRICE_DATA_ADAPTER = "PRICES"
+        self.LS_PRICE_ID = "PRICE."
+        self.LS_PRICE_SCHEMA = ["MarketId", "AuditId", "Bid",
+                                "Offer", "Change", "Direction",
+                                "High", "Low", "Price", "StatusSummary",
+                                "TickDate"]
+        self.LS_MARGIN_DATA_ADAPTER = "CLIENTACCOUNTMARGIN"
+        self.LS_MARGIN_ID = "CLIENTACCOUNTMARGIN"
+        self.LS_MARGIN_SCHEMA = ["Cash",
+                                 "CurrencyId",
+                                 "CurrencyISO",
+                                 "Margin",
+                                 "MarginIndicator",
+                                 "NetEquity",
+                                 "OpenTradeEquity",
+                                 "TradeableFunds",
+                                 "PendingFunds",
+                                 "TradingResource",
+                                 "TotalMarginRequirement"]
 
     def init_data(self):
-        api = CIApi()
+        api = API()
+        self.LS_PRICE_ID = self.LS_PRICE_ID + str(api.market_info[self.symbol]["MarketId"])
+        self.clientAccountMarginData = api.get_client_account_margin()
+
         priceBars = False
         while not priceBars:
             priceBars = api.get_pricebar_history(self.symbol,
@@ -665,13 +692,13 @@ class Context:
         self.time.insert(0, wcfDate2Sec(partialBar["BarDate"]))
 
     def update_data(self):
-        api = CIApi()
+        api = API()
         last_time_sec = self.time[0];
         time_diff = int((time.time() - last_time_sec) / intervalUnitSec(self))
 
         priceBars = False
         while not priceBars:
-            priceBars = api.get_pricebar_history(self.marketID,
+            priceBars = api.get_pricebar_history(self.symbol,
                                                  self.TimeInterval,
                                                  self.TimeSpan,
                                                  str(time_diff + 2))
@@ -699,8 +726,6 @@ class Context:
     def prepare_data(self, data):
         tableNo = data["_tableIdx_"]
         if tableNo == 1:
-            api = CIApi()
-
             data['TickDate'] = wcfDate2Sec(data['TickDate'])
             if data['Offer']:
                 data['Offer'] = float(data['Offer'])
@@ -721,7 +746,7 @@ class Context:
 
             for counter, indicator in enumerate(self.indicators):
                 indicator.onCalculate(self, len(self.time))
-            self.handle_data(data)
+            self.handle_data(self, data)
         elif tableNo == 2:
             if data["Cash"]:
                 self.clientAccountMarginData["Cash"] = data["Cash"]
@@ -746,11 +771,12 @@ class Context:
             if data["TradingResource"]:
                 self.clientAccountMarginData["TradingResource"] = data["TradingResource"]
 
+
 if __name__ == "__main__":
     accid = raw_input("Enter City Index account ID: ")
     password = raw_input("Enter City Index password: ")
 
-    api = CIApi(accid, password)
+    api = API(accid, password)
 
     print("Test Login...")
     if api.login():
@@ -805,7 +831,6 @@ if __name__ == "__main__":
         print("\tFailed\n\n")
         api.logout()
         exit()
-
 
     print("Test Logout...")
     if api.logout():

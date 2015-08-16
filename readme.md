@@ -7,11 +7,11 @@ CityIndex API written in Python
 This package depends on Python-requests `http://www.python-requests.org/`
 
 ## Usage
-Note: CIApi is a singleton class.
+Note: API is a singleton class.
 
 ### Init
 ```python
-api = CIApi(username, password)
+api = API(username, password)
 ```
 
 ### Authentication
